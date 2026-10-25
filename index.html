@@ -11,14 +11,20 @@
     h1{color:#21865b} .card{background:white;padding:16px;border-radius:14px;margin:14px 0}
     button{border:0;border-radius:9px;padding:12px 16px;background:#21865b;color:white;font-weight:700;font-size:1rem}
     input{box-sizing:border-box;width:100%;padding:11px;margin:6px 0 12px;border:1px solid #ccd8d1;border-radius:8px}
-    #reader{width:100%} #status{white-space:pre-wrap}
+    #reader{width:100%}
+    #status{white-space:pre-wrap}
     .small{font-size:.9rem;color:#586b62}
+    .connection-card{display:none !important}
+    .notice{display:none;margin:14px 0;padding:14px 16px;border-radius:12px;font-weight:600}
+    .notice.success{display:block;background:#e0f4e8;color:#176b48;border:1px solid #b7e2c8}
+    .notice.error{display:block;background:#fde8e7;color:#a12622;border:1px solid #f4c3c1}
+    .scanner-card{margin-top:14px}
   </style>
 </head>
 <body>
   <h1>NutriScan</h1>
   <p>Escaneá el código de barras de un producto para enviarlo a NutriScan.</p>
-  <div class="card">
+  <div class="card connection-card" aria-hidden="true">
     <label for="projectUrl">URL del proyecto Supabase</label>
     <input id="projectUrl" value="https://kolocddanxcchyvpndpe.supabase.co">
     <label for="publicKey">Clave pública (sb_publishable_…)</label>
@@ -26,7 +32,8 @@
     <button id="save">Conectar</button>
     <p id="status">Primero ingresá la clave pública y tocá Conectar.</p>
   </div>
-  <div class="card">
+  <div id="notice" class="notice" role="status" aria-live="polite"></div>
+  <div class="card scanner-card">
     <div id="reader"></div>
     <button id="start" disabled>Activar cámara</button>
     <p class="small">Si la cámara no funciona, podés escribir el código manualmente.</p>
@@ -35,11 +42,36 @@
     <button id="send" disabled>Enviar código</button>
   </div>
 <script>
+const SUPABASE_URL = "https://kolocddanxcchyvpndpe.supabase.co";
+const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_m8JsF854K-AtoL2qZoQyiQ_nxFftmBK";
+
 let supabaseClient = null;
 let scanner = null;
 let lastSent = "";
 const statusEl = document.getElementById("status");
+const noticeEl = document.getElementById("notice");
+
 function status(t){statusEl.textContent=t;}
+
+function showNotice(message, kind = "success") {
+  noticeEl.textContent = message;
+  noticeEl.className = "notice " + kind;
+}
+
+function connectSupabase() {
+  if (!window.supabase || !window.supabase.createClient) {
+    status("No se pudo cargar la conexión. Revisá tu conexión a internet y recargá la página.");
+    return false;
+  }
+  supabaseClient = window.supabase.createClient(
+    SUPABASE_URL,
+    SUPABASE_PUBLISHABLE_KEY
+  );
+  document.getElementById("start").disabled = false;
+  document.getElementById("send").disabled = false;
+  status("Conexión lista. Ya podés escanear o ingresar un código.");
+  return true;
+}
 function validCode(code){return /^[0-9]{8,14}$/.test(code);}
 async function sendCode(raw){
   const code=String(raw||"").trim();
@@ -47,106 +79,31 @@ async function sendCode(raw){
   if(!supabaseClient){status("Primero conectá Supabase.");return;}
   status("Enviando código "+code+"…");
   const {error}=await supabaseClient.from("codigos_barras").insert({codigo:code});
-  if(error){status("No se pudo enviar el código: "+error.message);return;}
+  if(error){
+    status("No se pudo enviar el código: "+error.message);
+    showNotice("No se pudo enviar el código. Revisá la conexión e intentá de nuevo.", "error");
+    return;
+  }
   document.getElementById("manual").value=code;
   status("Código "+code+" enviado. Revisá NutriScan en la computadora.");
+  showNotice("¡Código enviado a NutriScan en la computadora! Código: " + code, "success");
 }
-document.getElementById("save").addEventListener("click",()=>{
-  const url=document.getElementById("projectUrl").value.trim().replace(/\/+$/,"");
-  const key=document.getElementById("publicKey").value.trim();
-  if(!url.startsWith("https://")||!key.startsWith("sb_publishable_")){status("Revisá la URL y la clave pública. No uses una clave secreta.");return;}
-  supabaseClient=window.supabase.createClient(url,key);
-  document.getElementById("start").disabled=false;
-  document.getElementById("send").disabled=false;
-  status("Conexión configurada. Ya podés activar la cámara o enviar un código manual.");
+// La conexión se establece automáticamente al abrir la página.
+window.addEventListener("load", () => {
+  connectSupabase();
 });
 document.getElementById("send").addEventListener("click",()=>sendCode(document.getElementById("manual").value));
 document.getElementById("manual").addEventListener("keydown",e=>{if(e.key==="Enter")sendCode(e.target.value);});
-document.getElementById("start").addEventListener("click", async () => {
-  if (!supabaseClient) {
-    status("Primero conectá Supabase.");
-    return;
-  }
-
-  const startButton = document.getElementById("start");
-  startButton.disabled = true;
-
-  try {
-    if (!scanner) {
-      scanner = new Html5Qrcode("reader", { verbose: false });
-    }
-
-    // Elegir una cámara trasera cuando Safari permita enumerarlas.
-    let cameraConfig = { facingMode: "environment" };
-    try {
-      const cameras = await Html5Qrcode.getCameras();
-      if (cameras && cameras.length) {
-        const rearCamera = cameras.find(c =>
-          /back|rear|environment|trasera|posterior/i.test(c.label)
-        );
-        if (rearCamera) cameraConfig = rearCamera.id;
-      }
-    } catch (cameraListError) {
-      // Si Safari no muestra la lista, se usa facingMode: environment.
-    }
-
-    const formats = [
-      Html5QrcodeSupportedFormats.EAN_13,
-      Html5QrcodeSupportedFormats.EAN_8,
-      Html5QrcodeSupportedFormats.UPC_A,
-      Html5QrcodeSupportedFormats.UPC_E,
-      Html5QrcodeSupportedFormats.CODE_128,
-      Html5QrcodeSupportedFormats.ITF
-    ];
-
-    await scanner.start(
-      cameraConfig,
-      {
-        fps: 15,
-        qrbox: (viewfinderWidth, viewfinderHeight) => ({
-          width: Math.min(Math.floor(viewfinderWidth * 0.92), 420),
-          height: Math.min(Math.floor(viewfinderHeight * 0.38), 180)
-        }),
-        aspectRatio: 1.777,
-        disableFlip: true,
-        formatsToSupport: formats,
-        experimentalFeatures: { useBarCodeDetectorIfSupported: true }
-      },
-      async (decoded) => {
-        if (decoded !== lastSent) {
-          lastSent = decoded;
-          await sendCode(decoded);
-          setTimeout(() => { lastSent = ""; }, 2500);
-        }
-      },
-      () => {
-        // Es normal que algunos fotogramas no produzcan una lectura.
-      }
-    );
-
-    // Pedir enfoque continuo si el navegador y la cámara lo admiten.
-    // Si no está disponible, se mantiene el escáner activo sin ese ajuste.
-    try {
-      if (typeof scanner.applyVideoConstraints === "function") {
-        await scanner.applyVideoConstraints({
-          advanced: [{ focusMode: "continuous" }]
-        });
-      }
-    } catch (focusError) {
-      console.info("El ajuste de enfoque no está disponible en este navegador.", focusError);
-    }
-
-    status(
-      "Cámara activa. Poné el código horizontal dentro del recuadro, con buena luz. " +
-      "Probá a unos 10–20 cm y mové el teléfono lentamente hasta que enfoque."
-    );
-  } catch (e) {
-    startButton.disabled = false;
-    status(
-      "No se pudo iniciar el escáner. Permití el acceso a la cámara y comprobá que la página use HTTPS.\n" +
-      (e && e.message ? e.message : e)
-    );
-  }
+document.getElementById("start").addEventListener("click",async()=>{
+  if(!supabaseClient){status("Primero conectá Supabase.");return;}
+  try{
+    if(!scanner)scanner=new Html5Qrcode("reader");
+    await scanner.start({facingMode:"environment"},{fps:10,qrbox:{width:280,height:140},formatsToSupport:[Html5QrcodeSupportedFormats.EAN_13,Html5QrcodeSupportedFormats.EAN_8,Html5QrcodeSupportedFormats.UPC_A,Html5QrcodeSupportedFormats.UPC_E,Html5QrcodeSupportedFormats.CODE_128]},
+      async(decoded)=>{if(decoded!==lastSent){lastSent=decoded;await sendCode(decoded);setTimeout(()=>{lastSent="";},2500);}},
+      ()=>{});
+    status("Cámara activa. Enfocá el código de barras.");
+    document.getElementById("start").disabled=true;
+  }catch(e){status("No se pudo abrir la cámara. Permití el acceso a la cámara y comprobá que la página use HTTPS.\n"+e);}
 });
 </script>
 </body>
