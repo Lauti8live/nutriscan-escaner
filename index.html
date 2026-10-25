@@ -97,7 +97,12 @@ document.getElementById("manual").addEventListener("keydown",e=>{if(e.key==="Ent
 document.getElementById("start").addEventListener("click",async()=>{
   if(!supabaseClient){status("Primero conectá Supabase.");return;}
   try{
-    if(!scanner)scanner=new Html5Qrcode("reader");
+    if(!scanner)scanner=new Html5Qrcode("reader", {
+  verbose: false,
+  experimentalFeatures: {
+    useBarCodeDetectorIfSupported: false
+  }
+});
     await scanner.start({facingMode:"environment"},{fps:10,qrbox:{width:280,height:140},formatsToSupport:[Html5QrcodeSupportedFormats.EAN_13,Html5QrcodeSupportedFormats.EAN_8,Html5QrcodeSupportedFormats.UPC_A,Html5QrcodeSupportedFormats.UPC_E,Html5QrcodeSupportedFormats.CODE_128]},
       async(decoded)=>{if(decoded!==lastSent){lastSent=decoded;await sendCode(decoded);setTimeout(()=>{lastSent="";},2500);}},
       ()=>{});
